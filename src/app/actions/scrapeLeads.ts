@@ -5,47 +5,45 @@ import { analyzeWebsite } from "@/lib/gemini";
 export async function scrapeLeads(industryOrCompany: string, countryOrCity: string) {
   try {
     const apiKey = process.env.SERP_API_KEY;
-    console.log("🔑 Checking API Key:", apiKey ? "Found ✅" : "NOT FOUND ❌");
-
-    if (!apiKey) {
-      return { success: false, message: "System Error: API Key missing in Server!" };
-    }
+    if (!apiKey) return { success: false, message: "System Error: API Key missing!" };
 
     const searchQuery = `${industryOrCompany.trim()} in ${countryOrCity.trim()}`;
-    console.log("🎯 Targeting:", searchQuery);
-
     const url = `https://serpapi.com/search.json?engine=google_maps&q=${encodeURIComponent(searchQuery)}&api_key=${apiKey}`;
 
     const response = await fetch(url);
     const data = await response.json();
 
-    if (data.error) {
-      console.error("❌ SerpApi Error:", data.error);
-      return { success: false, message: "API Error: " + data.error };
-    }
+    if (data.error) return { success: false, message: "API Error: " + data.error };
 
     const results = data.local_results || [];
-    console.log("📊 Leads Found by Google:", results.length);
-
-    if (results.length === 0) {
-      return { success: false, message: "No leads found. Try a specific city like 'Dubai' or 'New York'." };
-    }
+    if (results.length === 0) return { success: false, message: "No leads found. Try a specific city." };
 
     let count = 0;
-    for (const biz of results.slice(0, 15)) {
-      
-      // ✅ Check: Agar website nahi hai toh hunt nahi karna
-      if (!biz.website) {
-        console.log(`🚫 Skipping ${biz.title} - No website for screenshot.`);
-        continue; 
+    for (const biz of results) {
+      if (!biz.website) continue; // Screenshot aur analysis ke liye website lazmi hai
+
+      // ✅ Expert Check: Duplicate by Website URL or Name
+      const exists = await prisma.lead.findFirst({
+        where: {
+          OR: [
+            { companyName: biz.title },
+            { websiteUrl: biz.website }
+          ]
+        }
+      });
+
+      if (exists) {
+        console.log(`⏩ Skipping ${biz.title} - Already in database.`);
+        continue;
       }
 
-      // Duplicate check
-      const exists = await prisma.lead.findFirst({ where: { companyName: biz.title } });
-      if (exists) continue;
-
-      // AI Analysis
-      const pitch = await analyzeWebsite(`Business: ${biz.title}. Category: ${biz.type}. Location: ${countryOrCity}`);
+      // AI Analysis - Logic to handle potential AI errors gracefully
+      let pitch = "Analysis Pending";
+      try {
+        pitch = await analyzeWebsite(`Business: ${biz.title}. Category: ${biz.type}. Location: ${countryOrCity}. Website: ${biz.website}`);
+      } catch (aiErr) {
+        console.error("AI skip for this lead, saving as pending.");
+      }
 
       await prisma.lead.create({
         data: {
@@ -58,12 +56,12 @@ export async function scrapeLeads(industryOrCompany: string, countryOrCity: stri
           status: "NEW",
         },
       });
-      count++;
 
-      if (count >= 10) break;
+      count++;
+      if (count >= 10) break; // Limit to 10 quality leads per hunt
     }
 
-    return { success: true, message: `Boom! ${count} new leads with websites captured.` };
+    return { success: true, message: `Success! ${count} unique leads captured for SM Technology.` };
 
   } catch (error: any) {
     console.error("❌ Fatal Error:", error.message);

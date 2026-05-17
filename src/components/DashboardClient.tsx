@@ -13,27 +13,47 @@ export default function DashboardClient({ initialNewLeads, initialSentLeads }: a
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [shortCopiedId, setShortCopiedId] = useState<string | null>(null);
   const [markingId, setMarkingId] = useState<string | null>(null);
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
 
-  // --- SMART WHATSAPP CHECK ---
+  // --- UNIVERSAL GLOBAL WHATSAPP CHECK ---
+  // Dunya ki kisi bhi country ka lead number ho, yeh check button ko seamlessly show karwayega
   const isWhatsAppValid = (phone: string) => {
-    if (!phone) return false;
-    const cleanPhone = phone.replace(/\s+/g, '').replace(/[()]/g, '').replace(/-/g, '');
-    // UAE Mobile Pattern Check
-    return /^((\+971|0)?5[024568])/.test(cleanPhone);
+    if (!phone || phone.trim() === "" || phone.toLowerCase().includes("no phone")) return false;
+    
+    // Sirf pure numbers nikalein
+    const cleanPhone = phone.replace(/[^0-9]/g, '');
+    
+    // International numbers standard ke mutabiq digits ki length 7 se 15 ke beech honi chahiye
+    return cleanPhone.length >= 7 && cleanPhone.length <= 15;
   };
 
-  // --- WHATSAPP ACTION ---
+  // --- UNIVERSAL WHATSAPP ROUTING ACTION ---
   const handleWhatsApp = (lead: any) => {
-    const message = `Salam! Hope you're doing well.\n\n${lead.aiAnalysis}\n\nCheck your website preview here: ${lead.websiteUrl}`;
-    const cleanPhone = lead.phoneNumber.replace(/\s+/g, '').replace(/[()]/g, '').replace(/-/g, '');
+    // Lead context custom pitch layout logic
+    const message = `Hello ${lead.companyName} Team!\n\n${lead.aiAnalysis || ""}\n\nCheck your website preview here: ${lead.websiteUrl}`;
     
-    let finalPhone = cleanPhone;
-    if (!finalPhone.startsWith('+')) {
-      if (finalPhone.startsWith('05')) finalPhone = '971' + finalPhone.substring(1);
-      else if (finalPhone.startsWith('5')) finalPhone = '971' + finalPhone;
+    // Step 1: Remove brackets, spaces, and hyphens completely
+    let cleanPhone = lead.phoneNumber.replace(/\s+/g, '').replace(/[()]/g, '').replace(/-/g, '');
+    
+    // Step 2: Clear leading international plus sign if present for the raw API endpoint
+    if (cleanPhone.startsWith('+')) {
+      cleanPhone = cleanPhone.substring(1);
+    }
+    
+    // Step 3: Handle typical leading zeros from localized formatting
+    // Agar number direct '05' se start ho raha hai bina international code ke, 
+    // to layout user target fallback database context se code assign karega (Default global support)
+    if (cleanPhone.startsWith('0')) {
+      if (lead.country?.toLowerCase() === 'ksa') {
+        cleanPhone = '966' + cleanPhone.substring(1);
+      } else if (lead.country?.toLowerCase() === 'uae' || cleanPhone.startsWith('05')) {
+        cleanPhone = '971' + cleanPhone.substring(1);
+      } else {
+        cleanPhone = cleanPhone.substring(1); // Strip local zero if unknown international prefix
+      }
     }
 
-    const url = `https://wa.me/${finalPhone.replace('+', '')}?text=${encodeURIComponent(message)}`;
+    const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
     window.open(url, '_blank');
   };
 
@@ -86,8 +106,10 @@ export default function DashboardClient({ initialNewLeads, initialSentLeads }: a
   };
 
   const handleSingleGenerate = async (id: string) => {
+    setRegeneratingId(id);
     const res = await generatePitchAction(id);
     if (res.success) window.location.reload();
+    setRegeneratingId(null);
   };
 
   return (
@@ -124,6 +146,7 @@ export default function DashboardClient({ initialNewLeads, initialSentLeads }: a
                   <div className="flex items-center gap-3">
                     <h3 className="text-xl font-bold">{lead.companyName}</h3>
                     <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-bold rounded uppercase">{lead.industry}</span>
+                    <span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-extrabold rounded uppercase">{lead.country || "Global"}</span>
                   </div>
                   <div className="flex gap-6 text-sm text-slate-500 font-medium">
                     <span className="flex items-center gap-1.5"><Phone size={14}/> {lead.phoneNumber || "No Phone"}</span>
@@ -131,44 +154,59 @@ export default function DashboardClient({ initialNewLeads, initialSentLeads }: a
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 flex-wrap">
-                    {/* WHATSAPP: Only for Mobile */}
-                    {isWhatsAppValid(lead.phoneNumber) && (
-                      <Button size="sm" onClick={() => handleWhatsApp(lead)} className="bg-green-600 hover:bg-green-700 text-white font-bold gap-2">
-                        <MessageSquare size={14}/> WhatsApp
-                      </Button>
-                    )}
+                {/* GLOBAL ACTION IMPLEMENTATION BUTTONS */}
+                <div className="flex items-center gap-2 flex-wrap ml-auto">
+                  <Button size="sm" variant="ghost" onClick={() => handleDelete(lead.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50">
+                    <Trash2 size={18} />
+                  </Button>
 
-                    <Button size="sm" variant="ghost" onClick={() => handleDelete(lead.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50">
-                     <Trash2 size={18} />
+                  <Button size="sm" onClick={() => handleMarkAsSent(lead.id)} disabled={markingId === lead.id} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-2 shadow-md">
+                    {markingId === lead.id ? <RefreshCw className="animate-spin" size={14}/> : <Send size={14}/>}
+                    Mark as Sent
+                  </Button>
+
+                  {/* UNIVERSAL WHATSAPP TRIGGER - Works flawlessly across KSA, UAE, US, UK, PK etc. */}
+                  {isWhatsAppValid(lead.phoneNumber) && (
+                    <Button size="sm" onClick={() => handleWhatsApp(lead)} className="bg-green-600 hover:bg-green-700 text-white font-bold gap-2 shadow-md">
+                      <MessageSquare size={14}/> Send on WhatsApp
                     </Button>
+                  )}
 
-                    <Button size="sm" onClick={() => handleMarkAsSent(lead.id)} disabled={markingId === lead.id} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-2 shadow-md">
-                     {markingId === lead.id ? <RefreshCw className="animate-spin" size={14}/> : <Send size={14}/>}
-                     Mark as Sent
-                    </Button>
-
-                    <SendLeadButton
-                     linkedinUrl={lead.linkedinUrl || `https://www.google.com/search?q=site:linkedin.com/in/ ("${lead.companyName.split(' ')[0]}" OR "${lead.companyName}") (CEO OR Founder OR Owner)`}
-                     suggestedMsg={lead.aiAnalysis || ""}
-                     leadId={lead.id}
-                    />
+                  <SendLeadButton
+                    linkedinUrl={lead.linkedinUrl || `https://www.google.com/search?q=site:linkedin.com/in/ ("${lead.companyName.split(' ')[0]}" OR "${lead.companyName}") (CEO OR Founder OR Owner)`}
+                    suggestedMsg={lead.aiAnalysis || ""}
+                    leadId={lead.id}
+                  />
                 </div>
               </div>
 
+              {/* AI PITCH VISUAL CONTAINER */}
               <div className="bg-blue-50/50 p-6 rounded-lg border border-blue-100 relative">
                 <div className="absolute top-4 right-4 flex gap-2">
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={() => handleSingleGenerate(lead.id)} 
+                    disabled={regeneratingId === lead.id}
+                    className="bg-white border-blue-400 text-blue-600 gap-2 font-bold hover:bg-blue-50"
+                  >
+                    <RefreshCw size={14} className={regeneratingId === lead.id ? "animate-spin" : ""} />
+                    {regeneratingId === lead.id ? "Refining..." : "Regenerate"}
+                  </Button>
+
                   <Button size="sm" variant="outline" onClick={() => handleCopy(getShortNote(lead), lead.id, "short")} className="bg-white border-blue-400 text-blue-600 gap-2 font-bold hover:bg-blue-50">
                     {shortCopiedId === lead.id ? <Check size={14} className="text-green-500"/> : <MessageSquare size={14}/>}
                     {shortCopiedId === lead.id ? "Copied!" : "Short Pitch"}
                   </Button>
+                  
                   <Button size="sm" variant="ghost" onClick={() => handleCopy(lead.aiAnalysis, lead.id, "full")} className="bg-white border text-blue-600 gap-2 font-bold hover:bg-blue-100">
                     {copiedId === lead.id ? <Check size={14}/> : <Copy size={14}/>}
                     {copiedId === lead.id ? "Copied Full!" : "Full Pitch"}
                   </Button>
                 </div>
-                <p className="text-[11px] font-bold text-blue-400 uppercase mb-3 tracking-widest">AI LinkedIn Pitch:</p>
-                <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-line font-medium mb-4 pr-20">
+                
+                <p className="text-[11px] font-bold text-blue-400 uppercase mb-3 tracking-widest">AI Universal Pitch Pipeline:</p>
+                <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-line font-medium mb-4 pr-40">
                   {lead.aiAnalysis || "No pitch generated yet."}
                 </div>
 
