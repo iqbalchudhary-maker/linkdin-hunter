@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import DashboardClient from "@/components/DashboardClient";
 
+export const dynamic = 'force-dynamic';
 export default async function DashboardPage() {
   // Purana "NEW" aur naya "new" dono fetch karein
   const newLeads = await prisma.lead.findMany({
