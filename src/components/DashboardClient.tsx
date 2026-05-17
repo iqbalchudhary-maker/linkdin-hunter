@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation"; // 👈 Vercel cache bypass karne ke liye add kiya
 import HuntForm from "@/components/HuntForm";
 import SendLeadButton from "@/components/SendLeadButton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -9,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { generatePitchAction, generateAllPitchesAction } from "@/app/actions/generatePitch";
 
 export default function DashboardClient({ initialNewLeads, initialSentLeads }: any) {
+  const router = useRouter(); // 👈 Router ko initialize kiya
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [shortCopiedId, setShortCopiedId] = useState<string | null>(null);
@@ -16,40 +18,28 @@ export default function DashboardClient({ initialNewLeads, initialSentLeads }: a
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
 
   // --- UNIVERSAL GLOBAL WHATSAPP CHECK ---
-  // Dunya ki kisi bhi country ka lead number ho, yeh check button ko seamlessly show karwayega
   const isWhatsAppValid = (phone: string) => {
     if (!phone || phone.trim() === "" || phone.toLowerCase().includes("no phone")) return false;
-    
-    // Sirf pure numbers nikalein
     const cleanPhone = phone.replace(/[^0-9]/g, '');
-    
-    // International numbers standard ke mutabiq digits ki length 7 se 15 ke beech honi chahiye
     return cleanPhone.length >= 7 && cleanPhone.length <= 15;
   };
 
   // --- UNIVERSAL WHATSAPP ROUTING ACTION ---
   const handleWhatsApp = (lead: any) => {
-    // Lead context custom pitch layout logic
     const message = `Hello ${lead.companyName} Team!\n\n${lead.aiAnalysis || ""}\n\nCheck your website preview here: ${lead.websiteUrl}`;
-    
-    // Step 1: Remove brackets, spaces, and hyphens completely
     let cleanPhone = lead.phoneNumber.replace(/\s+/g, '').replace(/[()]/g, '').replace(/-/g, '');
     
-    // Step 2: Clear leading international plus sign if present for the raw API endpoint
     if (cleanPhone.startsWith('+')) {
       cleanPhone = cleanPhone.substring(1);
     }
     
-    // Step 3: Handle typical leading zeros from localized formatting
-    // Agar number direct '05' se start ho raha hai bina international code ke, 
-    // to layout user target fallback database context se code assign karega (Default global support)
     if (cleanPhone.startsWith('0')) {
       if (lead.country?.toLowerCase() === 'ksa') {
         cleanPhone = '966' + cleanPhone.substring(1);
       } else if (lead.country?.toLowerCase() === 'uae' || cleanPhone.startsWith('05')) {
         cleanPhone = '971' + cleanPhone.substring(1);
       } else {
-        cleanPhone = cleanPhone.substring(1); // Strip local zero if unknown international prefix
+        cleanPhone = cleanPhone.substring(1);
       }
     }
 
@@ -64,7 +54,9 @@ export default function DashboardClient({ initialNewLeads, initialSentLeads }: a
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
-      if (response.ok) window.location.reload();
+      if (response.ok) {
+        router.refresh(); // 👈 window.location.reload() ki jagah lagaya
+      }
     } catch (error) {
       console.error("Status update fail:", error);
     } finally {
@@ -76,7 +68,9 @@ export default function DashboardClient({ initialNewLeads, initialSentLeads }: a
     if (confirm("Are you sure you want to delete this lead?")) {
       try {
         const response = await fetch(`/api/leads/${id}`, { method: 'DELETE' });
-        if (response.ok) window.location.reload();
+        if (response.ok) {
+          router.refresh(); // 👈 window.location.reload() ki jagah lagaya
+        }
       } catch (error) {
         console.error("Delete failed:", error);
       }
@@ -101,14 +95,18 @@ export default function DashboardClient({ initialNewLeads, initialSentLeads }: a
   const handleBulkGenerate = async () => {
     setLoading(true);
     const res = await generateAllPitchesAction();
-    if (res.success) window.location.reload();
+    if (res.success) {
+      router.refresh(); // 👈 window.location.reload() ki jagah lagaya
+    }
     setLoading(false);
   };
 
   const handleSingleGenerate = async (id: string) => {
     setRegeneratingId(id);
     const res = await generatePitchAction(id);
-    if (res.success) window.location.reload();
+    if (res.success) {
+      router.refresh(); // 👈 window.location.reload() ki jagah lagaya
+    }
     setRegeneratingId(null);
   };
 
@@ -154,7 +152,6 @@ export default function DashboardClient({ initialNewLeads, initialSentLeads }: a
                   </div>
                 </div>
 
-                {/* GLOBAL ACTION IMPLEMENTATION BUTTONS */}
                 <div className="flex items-center gap-2 flex-wrap ml-auto">
                   <Button size="sm" variant="ghost" onClick={() => handleDelete(lead.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50">
                     <Trash2 size={18} />
@@ -165,7 +162,6 @@ export default function DashboardClient({ initialNewLeads, initialSentLeads }: a
                     Mark as Sent
                   </Button>
 
-                  {/* UNIVERSAL WHATSAPP TRIGGER - Works flawlessly across KSA, UAE, US, UK, PK etc. */}
                   {isWhatsAppValid(lead.phoneNumber) && (
                     <Button size="sm" onClick={() => handleWhatsApp(lead)} className="bg-green-600 hover:bg-green-700 text-white font-bold gap-2 shadow-md">
                       <MessageSquare size={14}/> Send on WhatsApp
@@ -180,7 +176,6 @@ export default function DashboardClient({ initialNewLeads, initialSentLeads }: a
                 </div>
               </div>
 
-              {/* AI PITCH VISUAL CONTAINER */}
               <div className="bg-blue-50/50 p-6 rounded-lg border border-blue-100 relative">
                 <div className="absolute top-4 right-4 flex gap-2">
                   <Button 
