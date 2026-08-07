@@ -8,14 +8,28 @@ datasource db {
 }
 
 model Lead {
-  id           String   @id @default(cuid())
+  id           String            @id @default(cuid())
   companyName  String
   websiteUrl   String?
-  phoneNumber  String?  // Nayi field Phone ke liye
-  linkedinUrl  String?  // LinkedIn profile ke liye
+  phoneNumber  String?
+  email        String?
+  instagramUrl String?
+  twitterUrl   String?
+  source       String            @default("google")
   industry     String
   country      String
-  aiAnalysis   String?  @db.Text
-  status       String   @default("NEW") // Status: NEW ya SENT
-  createdAt    DateTime @default(now())
+  aiAnalysis   String
+  status       String            @default("NEW")
+  createdAt    DateTime          @default(now())
+  
+  // Opposite relation field
+  interactions LeadInteraction[] 
+}
+
+model LeadInteraction {
+  id        String   @id @default(cuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  message   String   @db.Text
+  createdAt DateTime @default(now())
 }

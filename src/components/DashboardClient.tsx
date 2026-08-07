@@ -1,232 +1,411 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation"; // 👈 Vercel cache bypass karne ke liye add kiya
+import ReactMarkdown from "react-markdown";
 import HuntForm from "@/components/HuntForm";
-import SendLeadButton from "@/components/SendLeadButton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Phone, Globe, Sparkles, RefreshCw, Copy, Check, MessageSquare, Send, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { generatePitchAction, generateAllPitchesAction } from "@/app/actions/generatePitch";
+import { 
+  Building2, 
+  Globe, 
+  Mail, 
+  MessageCircle, 
+  Send, 
+  Sparkles, 
+  CheckCircle2, 
+  Clock, 
+  ExternalLink,
+  Trash2,
+  RefreshCw,
+  Copy,
+  Check,
+  Share2
+} from "lucide-react";
 
-export default function DashboardClient({ initialNewLeads, initialSentLeads }: any) {
-  const router = useRouter(); // 👈 Router ko initialize kiya
-  const [loading, setLoading] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [shortCopiedId, setShortCopiedId] = useState<string | null>(null);
-  const [markingId, setMarkingId] = useState<string | null>(null);
+interface Lead {
+  id: string;
+  companyName: string;
+  websiteUrl: string | null;
+  phoneNumber: string | null;
+  email?: string | null;
+  instagramUrl?: string | null;
+  twitterUrl?: string | null;
+  industry: string;
+  country: string;
+  aiAnalysis: string | null;
+  status: string;
+  createdAt: string | Date;
+}
+
+interface DashboardClientProps {
+  initialNewLeads: Lead[];
+  initialSentLeads: Lead[];
+}
+
+export default function DashboardClient({ initialNewLeads, initialSentLeads }: DashboardClientProps) {
+  const [newLeads, setNewLeads] = useState<Lead[]>(initialNewLeads);
+  const [sentLeads, setSentLeads] = useState<Lead[]>(initialSentLeads);
+  const [activeTab, setActiveTab] = useState<"new" | "sent">("new");
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // --- UNIVERSAL GLOBAL WHATSAPP CHECK ---
-  const isWhatsAppValid = (phone: string) => {
-    if (!phone || phone.trim() === "" || phone.toLowerCase().includes("no phone")) return false;
-    const cleanPhone = phone.replace(/[^0-9]/g, '');
-    return cleanPhone.length >= 7 && cleanPhone.length <= 15;
-  };
-
-  // --- UNIVERSAL WHATSAPP ROUTING ACTION ---
-  const handleWhatsApp = (lead: any) => {
-    const message = `Hello ${lead.companyName} Team!\n\n${lead.aiAnalysis || ""}\n\nCheck your website preview here: ${lead.websiteUrl}`;
-    let cleanPhone = lead.phoneNumber.replace(/\s+/g, '').replace(/[()]/g, '').replace(/-/g, '');
-    
-    if (cleanPhone.startsWith('+')) {
-      cleanPhone = cleanPhone.substring(1);
-    }
-    
-    if (cleanPhone.startsWith('0')) {
-      if (lead.country?.toLowerCase() === 'ksa') {
-        cleanPhone = '966' + cleanPhone.substring(1);
-      } else if (lead.country?.toLowerCase() === 'uae' || cleanPhone.startsWith('05')) {
-        cleanPhone = '971' + cleanPhone.substring(1);
-      } else {
-        cleanPhone = cleanPhone.substring(1);
-      }
-    }
-
-    const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
-    window.open(url, '_blank');
-  };
-
-  const handleMarkAsSent = async (id: string) => {
-    setMarkingId(id);
+  // Mark Lead as Sent or Handled
+  const handleMarkSent = async (leadId: string) => {
+    setLoadingId(leadId);
     try {
-      const response = await fetch(`/api/leads/${id}/mark-sent`, { 
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+      const response = await fetch(`/api/leads/${leadId}/mark-sent`, {
+        method: "POST",
       });
+      
       if (response.ok) {
-        router.refresh(); // 👈 window.location.reload() ki jagah lagaya
+        const movedLead = newLeads.find((l) => l.id === leadId);
+        if (movedLead) {
+          setNewLeads(newLeads.filter((l) => l.id !== leadId));
+          setSentLeads([{ ...movedLead, status: "SENT" }, ...sentLeads]);
+        }
+      } else {
+        alert("Status update karne mein masla ho gaya.");
       }
     } catch (error) {
-      console.error("Status update fail:", error);
+      console.error("Failed to update status", error);
     } finally {
-      setMarkingId(null);
+      setLoadingId(null);
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (confirm("Are you sure you want to delete this lead?")) {
-      try {
-        const response = await fetch(`/api/leads/${id}`, { method: 'DELETE' });
-        if (response.ok) {
-          router.refresh(); // 👈 window.location.reload() ki jagah lagaya
-        }
-      } catch (error) {
-        console.error("Delete failed:", error);
+  // Delete Lead Handler
+  const handleDeleteLead = async (leadId: string) => {
+    if (!confirm("Aap waqai is lead ko delete karna chahte hain?")) return;
+    
+    setDeletingId(leadId);
+    try {
+      const response = await fetch(`/api/leads/${leadId}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        setNewLeads(newLeads.filter((l) => l.id !== leadId));
+        setSentLeads(sentLeads.filter((l) => l.id !== leadId));
+      } else {
+        alert("Lead delete karne mein masla ho gaya.");
       }
+    } catch (error) {
+      console.error("Delete Error:", error);
+    } finally {
+      setDeletingId(null);
     }
   };
 
-  const getShortNote = (lead: any) => {
-    return `Hi! I've built an AI tool that analyzed ${lead.companyName}'s lead flow. I have a custom audit & screenshot ready. Let's connect!`;
+  // Copy AI Message to Clipboard
+  const handleCopyMessage = (lead: Lead) => {
+    if (!lead.aiAnalysis) return;
+    navigator.clipboard.writeText(lead.aiAnalysis);
+    setCopiedId(lead.id);
+    setTimeout(() => {
+      setCopiedId(null);
+    }, 2000);
   };
 
-  const handleCopy = (text: string, id: string, type: "full" | "short" = "full") => {
-    navigator.clipboard.writeText(text);
-    if (type === "short") {
-      setShortCopiedId(id);
-      setTimeout(() => setShortCopiedId(null), 2000);
-    } else {
-      setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2000);
+  // Email Click Handler with Validation
+  const handleEmailClick = (lead: Lead) => {
+    if (!lead.email) {
+      alert("Is company ka email address mojood nahi hai.");
+      return;
+    }
+
+    const subject = encodeURIComponent(`Growth & AI Automation for ${lead.companyName}`);
+    const body = encodeURIComponent(lead.aiAnalysis || "");
+    const mailtoUrl = `mailto:${lead.email}?subject=${subject}&body=${body}`;
+    window.location.href = mailtoUrl;
+  };
+
+  // WhatsApp Click Handler with Validation
+  const handleWhatsAppClick = (lead: Lead) => {
+    if (!lead.phoneNumber) {
+      alert("Yeh number WhatsApp par registered nahi hai ya mojood nahi hai.");
+      return;
+    }
+
+    const cleanedPhone = lead.phoneNumber.replace(/[^0-9]/g, "");
+
+    if (cleanedPhone.length < 10) {
+      alert(`Ghalat ya namukammal number (${lead.phoneNumber}): Yeh WhatsApp par registered nahi ho sakta.`);
+      return;
+    }
+
+    const encodedMessage = encodeURIComponent(lead.aiAnalysis || "");
+    const whatsappUrl = `https://api.whatsapp.com/send?phone=${cleanedPhone}&text=${encodedMessage}`;
+    window.open(whatsappUrl, "_blank");
+  };
+
+  // Twitter Click Handler with Validation
+  const handleTwitterClick = (lead: Lead) => {
+    if (!lead.twitterUrl) {
+      alert("Is lead ka Twitter/X profile link mojood nahi hai.");
+      return;
+    }
+    window.open(lead.twitterUrl, "_blank");
+  };
+
+  // Instagram Click Handler with Validation
+  const handleInstagramClick = (lead: Lead) => {
+    if (!lead.instagramUrl) {
+      alert("Is lead ka Instagram profile link mojood nahi hai.");
+      return;
+    }
+    window.open(lead.instagramUrl, "_blank");
+  };
+
+  // Regenerate AI Message Handler
+  const handleRegeneratePitch = async (lead: Lead) => {
+    setRegeneratingId(lead.id);
+    try {
+      const response = await fetch(`/api/leads/${lead.id}/regenerate`, {
+        method: "POST",
+      });
+
+      const text = await response.text();
+      let data;
+      
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        console.error("API returned HTML instead of JSON:", text);
+        alert("Server error: Regenerate API route mojood nahi hai ya crash ho gayi hai.");
+        return;
+      }
+
+      if (response.ok && data.aiAnalysis) {
+        const updatedAnalysis = data.aiAnalysis;
+        setNewLeads(newLeads.map(l => l.id === lead.id ? { ...l, aiAnalysis: updatedAnalysis } : l));
+        setSentLeads(sentLeads.map(l => l.id === lead.id ? { ...l, aiAnalysis: updatedAnalysis } : l));
+      } else {
+        alert(data.error || "Naya message generate karne mein masla ho gaya.");
+      }
+    } catch (error) {
+      console.error("Regenerate Error:", error);
+      alert("Network error ki wajah se message regenerate nahi ho saka.");
+    } finally {
+      setRegeneratingId(null);
     }
   };
 
-  const handleBulkGenerate = async () => {
-    setLoading(true);
-    const res = await generateAllPitchesAction();
-    if (res.success) {
-      router.refresh(); // 👈 window.location.reload() ki jagah lagaya
-    }
-    setLoading(false);
-  };
-
-  const handleSingleGenerate = async (id: string) => {
-    setRegeneratingId(id);
-    const res = await generatePitchAction(id);
-    if (res.success) {
-      router.refresh(); // 👈 window.location.reload() ki jagah lagaya
-    }
-    setRegeneratingId(null);
-  };
+  const currentList = activeTab === "new" ? newLeads : sentLeads;
 
   return (
-    <div className="max-w-6xl mx-auto p-6 md:p-10 space-y-8 min-h-screen bg-slate-50/50">
-      <div className="flex justify-between items-end border-b pb-6">
-        <div className="space-y-1">
-          <h1 className="text-4xl font-extrabold text-slate-900">
-            Ecom-Sniper <span className="text-blue-600">Console</span> 🎯
+    <div className="min-h-screen bg-[#020617] text-white p-6 md:p-10">
+      {/* 1. Header Section */}
+      <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8 border-b border-white/10 pb-6">
+        <div>
+          <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-white via-gray-200 to-blue-400 bg-clip-text text-transparent">
+            SM Tech Hunter Console
           </h1>
-          <p className="text-slate-500 font-medium">Developed by Ghulam Abbas Bhatti</p>
+          <p className="text-gray-400 text-sm mt-1">
+            Hunt leads, analyze gaps with AI, and send automated outreach emails & messages.
+          </p>
+        </div>
+
+        {/* Status Tabs */}
+        <div className="flex items-center gap-3">
+          <div className="bg-white/5 border border-white/10 rounded-xl p-1.5 flex gap-2">
+            <button
+              onClick={() => setActiveTab("new")}
+              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === "new" 
+                  ? "bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]" 
+                  : "text-gray-400 hover:text-white"
+              }`}
+            >
+              New Leads ({newLeads.length})
+            </button>
+            <button
+              onClick={() => setActiveTab("sent")}
+              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === "sent" 
+                  ? "bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]" 
+                  : "text-gray-400 hover:text-white"
+              }`}
+            >
+              Sent / Contacted ({sentLeads.length})
+            </button>
+          </div>
         </div>
       </div>
 
-      <HuntForm />
-
-      <Tabs defaultValue="hunt" className="w-full">
-        <div className="flex justify-between items-center mb-6">
-          <TabsList className="grid w-100 grid-cols-2 bg-slate-200/50 p-1">
-            <TabsTrigger value="hunt" className="font-bold">Target Hunt List ({initialNewLeads.length})</TabsTrigger>
-            <TabsTrigger value="sent" className="font-bold">Sent History ({initialSentLeads.length})</TabsTrigger>
-          </TabsList>
-
-          <Button onClick={handleBulkGenerate} disabled={loading} variant="outline" className="border-orange-500 text-orange-600 font-bold gap-2 shadow-sm">
-            {loading ? <RefreshCw className="animate-spin" size={16} /> : <Sparkles size={16} />}
-            Generate All Pitches
-          </Button>
+      {/* 2. Embedded Lead Hunting Form */}
+      <div className="max-w-7xl mx-auto mb-12 bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur-md shadow-2xl">
+        <div className="flex items-center gap-2 mb-4 text-blue-400 text-sm font-semibold uppercase tracking-wider">
+          <Sparkles size={16} /> Start AI Lead Hunting
         </div>
+        <HuntForm />
+      </div>
 
-        <TabsContent value="hunt" className="space-y-6">
-          {initialNewLeads.map((lead: any) => (
-            <div key={lead.id} className="bg-white border-l-4 border-l-blue-600 rounded-xl p-6 shadow-sm flex flex-col gap-6">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-xl font-bold">{lead.companyName}</h3>
-                    <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-bold rounded uppercase">{lead.industry}</span>
-                    <span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-extrabold rounded uppercase">{lead.country || "Global"}</span>
+      {/* 3. Main Leads Grid / List */}
+      <div className="max-w-7xl mx-auto">
+        {currentList.length === 0 ? (
+          <div className="text-center py-20 bg-white/5 border border-white/5 rounded-2xl">
+            <Sparkles className="mx-auto text-blue-500 mb-4 animate-bounce" size={40} />
+            <h3 className="text-xl font-bold text-gray-300">No leads found in this section</h3>
+            <p className="text-gray-500 text-sm mt-1">Use the hunting form above to start extracting and analyzing leads.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-6">
+            {currentList.map((lead) => {
+              return (
+                <div 
+                  key={lead.id}
+                  className="bg-white/5 border border-white/10 rounded-2xl p-6 md:p-8 hover:border-blue-500/40 transition-all shadow-xl backdrop-blur-sm flex flex-col gap-6"
+                >
+                  {/* Lead Info & Contact Actions Header */}
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-white/5 pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-blue-600/10 border border-blue-500/20 p-3 rounded-xl text-blue-400">
+                        <Building2 size={24} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-3">
+                          <h2 className="text-xl font-bold text-white">{lead.companyName}</h2>
+                          {/* Status Badge */}
+                          <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wide border ${
+                            lead.status === "SENT" 
+                              ? "bg-green-500/10 text-green-400 border-green-500/30" 
+                              : "bg-blue-500/10 text-blue-400 border-blue-500/30"
+                          }`}>
+                            {lead.status}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400 mt-1">
+                          <span className="bg-white/5 px-2.5 py-1 rounded-md border border-white/5 text-blue-300 font-medium">
+                            {lead.industry}
+                          </span>
+                          <span>•</span>
+                          <span>{lead.country}</span>
+                          <span>•</span>
+                          <span className="flex items-center gap-1">
+                            <Clock size={12} /> {new Date(lead.createdAt).toISOString().split('T')[0]}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons: Website, Email, WhatsApp, Twitter, Instagram, Copy, Regenerate, Delete */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {lead.websiteUrl && (
+                        <a 
+                          href={lead.websiteUrl} 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-gray-300 border border-white/10 transition-colors"
+                        >
+                          <Globe size={14} className="text-blue-400" /> Website <ExternalLink size={10} />
+                        </a>
+                      )}
+
+                      {/* Email Button */}
+                      <button 
+                        onClick={() => handleEmailClick(lead)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-xs font-semibold text-blue-300 border border-blue-500/20 transition-all"
+                      >
+                        <Mail size={14} className="text-blue-400" /> Email
+                      </button>
+
+                      {/* WhatsApp Button */}
+                      <button 
+                        onClick={() => handleWhatsAppClick(lead)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-green-500/10 hover:bg-green-500/20 text-xs font-semibold text-green-300 border border-green-500/20 transition-all"
+                      >
+                        <MessageCircle size={14} className="text-green-400" /> WhatsApp
+                      </button>
+
+                      {/* Twitter Button */}
+                      <button 
+                        onClick={() => handleTwitterClick(lead)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-xs font-semibold text-sky-300 border border-sky-500/20 transition-all"
+                      >
+                        <Share2 size={14} className="text-sky-400" /> Twitter
+                      </button>
+
+                      {/* Instagram Button */}
+                      <button 
+                        onClick={() => handleInstagramClick(lead)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-pink-500/10 hover:bg-pink-500/20 text-xs font-semibold text-pink-300 border border-pink-500/20 transition-all"
+                      >
+                        <Share2 size={14} className="text-pink-400" /> Instagram
+                      </button>
+
+                      {/* Copy Message Button */}
+                      <button 
+                        onClick={() => handleCopyMessage(lead)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-xs font-semibold text-amber-300 border border-amber-500/20 transition-all"
+                        title="Copy AI Pitch"
+                      >
+                        {copiedId === lead.id ? <Check size={14} className="text-green-400" /> : <Copy size={14} />} 
+                        {copiedId === lead.id ? "Copied!" : "Copy"}
+                      </button>
+
+                      {/* Regenerate Message Button */}
+                      <button 
+                        onClick={() => handleRegeneratePitch(lead)}
+                        disabled={regeneratingId === lead.id}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-xs font-semibold text-purple-300 border border-purple-500/20 transition-all disabled:opacity-50"
+                        title="Regenerate Different AI Pitch"
+                      >
+                        <RefreshCw size={14} className={regeneratingId === lead.id ? "animate-spin" : ""} /> 
+                        {regeneratingId === lead.id ? "Generating..." : "Regenerate Message"}
+                      </button>
+
+                      {/* Delete Button */}
+                      <button 
+                        onClick={() => handleDeleteLead(lead.id)}
+                        disabled={deletingId === lead.id}
+                        className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-xs font-semibold text-red-300 border border-red-500/20 transition-all"
+                        title="Delete Lead"
+                      >
+                        <Trash2 size={14} /> {deletingId === lead.id ? "..." : "Delete"}
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex gap-6 text-sm text-slate-500 font-medium">
-                    <span className="flex items-center gap-1.5"><Phone size={14}/> {lead.phoneNumber || "No Phone"}</span>
-                    {lead.websiteUrl && <a href={lead.websiteUrl} target="_blank" className="text-blue-600 hover:underline flex items-center gap-1.5"><Globe size={14}/> Website</a>}
+
+                  {/* AI Generated Outreach Pitch Section */}
+                  <div className="bg-black/40 border border-white/5 rounded-xl p-5 md:p-6">
+                    <div>
+                      <div className="flex items-center gap-2 text-xs font-semibold text-blue-400 uppercase tracking-wider mb-3">
+                        <Sparkles size={14} /> AI Generated Outreach Pitch
+                      </div>
+                       
+                      <div className="text-gray-300 text-sm leading-relaxed whitespace-pre-line font-sans prose prose-invert max-w-none">
+                        <ReactMarkdown>{lead.aiAnalysis || "No AI analysis available for this lead."}</ReactMarkdown>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Footer Action */}
+                  <div className="flex justify-between items-center pt-2">
+                    <div className="text-xs text-gray-400">
+                      Status: <span className="text-white font-semibold">{lead.status}</span>
+                    </div>
+
+                    {activeTab === "new" ? (
+                      <Button 
+                        onClick={() => handleMarkSent(lead.id)}
+                        disabled={loadingId === lead.id}
+                        className="bg-blue-600 hover:bg-blue-700 text-white text-xs md:text-sm font-semibold px-5 py-2.5 rounded-xl shadow-[0_0_15px_rgba(37,99,235,0.3)] transition-all"
+                      >
+                        {loadingId === lead.id ? "Updating..." : "Mark as Sent / Contacted"} <Send size={14} className="ml-2" />
+                      </Button>
+                    ) : (
+                      <div className="flex items-center gap-2 text-xs text-green-400 bg-green-500/10 border border-green-500/20 px-3.5 py-1.5 rounded-lg font-medium">
+                        <CheckCircle2 size={14} /> Outreach Completed
+                      </div>
+                    )}
                   </div>
                 </div>
-
-                <div className="flex items-center gap-2 flex-wrap ml-auto">
-                  <Button size="sm" variant="ghost" onClick={() => handleDelete(lead.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50">
-                    <Trash2 size={18} />
-                  </Button>
-
-                  <Button size="sm" onClick={() => handleMarkAsSent(lead.id)} disabled={markingId === lead.id} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-2 shadow-md">
-                    {markingId === lead.id ? <RefreshCw className="animate-spin" size={14}/> : <Send size={14}/>}
-                    Mark as Sent
-                  </Button>
-
-                  {isWhatsAppValid(lead.phoneNumber) && (
-                    <Button size="sm" onClick={() => handleWhatsApp(lead)} className="bg-green-600 hover:bg-green-700 text-white font-bold gap-2 shadow-md">
-                      <MessageSquare size={14}/> Send on WhatsApp
-                    </Button>
-                  )}
-
-                  <SendLeadButton
-                    linkedinUrl={lead.linkedinUrl || `https://www.google.com/search?q=site:linkedin.com/in/ ("${lead.companyName.split(' ')[0]}" OR "${lead.companyName}") (CEO OR Founder OR Owner)`}
-                    suggestedMsg={lead.aiAnalysis || ""}
-                    leadId={lead.id}
-                  />
-                </div>
-              </div>
-
-              <div className="bg-blue-50/50 p-6 rounded-lg border border-blue-100 relative">
-                <div className="absolute top-4 right-4 flex gap-2">
-                  <Button 
-                    size="sm" 
-                    variant="outline" 
-                    onClick={() => handleSingleGenerate(lead.id)} 
-                    disabled={regeneratingId === lead.id}
-                    className="bg-white border-blue-400 text-blue-600 gap-2 font-bold hover:bg-blue-50"
-                  >
-                    <RefreshCw size={14} className={regeneratingId === lead.id ? "animate-spin" : ""} />
-                    {regeneratingId === lead.id ? "Refining..." : "Regenerate"}
-                  </Button>
-
-                  <Button size="sm" variant="outline" onClick={() => handleCopy(getShortNote(lead), lead.id, "short")} className="bg-white border-blue-400 text-blue-600 gap-2 font-bold hover:bg-blue-50">
-                    {shortCopiedId === lead.id ? <Check size={14} className="text-green-500"/> : <MessageSquare size={14}/>}
-                    {shortCopiedId === lead.id ? "Copied!" : "Short Pitch"}
-                  </Button>
-                  
-                  <Button size="sm" variant="ghost" onClick={() => handleCopy(lead.aiAnalysis, lead.id, "full")} className="bg-white border text-blue-600 gap-2 font-bold hover:bg-blue-100">
-                    {copiedId === lead.id ? <Check size={14}/> : <Copy size={14}/>}
-                    {copiedId === lead.id ? "Copied Full!" : "Full Pitch"}
-                  </Button>
-                </div>
-                
-                <p className="text-[11px] font-bold text-blue-400 uppercase mb-3 tracking-widest">AI Universal Pitch Pipeline:</p>
-                <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-line font-medium mb-4 pr-40">
-                  {lead.aiAnalysis || "No pitch generated yet."}
-                </div>
-
-                <div className="mt-4">
-                  <p className="text-[10px] font-bold text-slate-400 mb-2 uppercase">Website Preview:</p>
-                  <img 
-                    src={`https://s0.wp.com/mshots/v1/${encodeURIComponent(lead.websiteUrl || "google.com")}?w=400&h=250`} 
-                    alt="Preview" 
-                    className="rounded-lg border shadow-sm w-full max-w-sm bg-white"
-                  />
-                </div>
-              </div>
-            </div>
-          ))}
-        </TabsContent>
-
-        <TabsContent value="sent" className="space-y-6">
-          {initialSentLeads.map((lead: any) => (
-              <div key={lead.id} className="bg-white border-l-4 border-l-emerald-500 rounded-xl p-6 shadow-sm mb-4">
-                 <h3 className="font-bold">{lead.companyName} ✅</h3>
-                 <p className="text-xs text-slate-500">{lead.industry}</p>
-              </div>
-           ))}
-        </TabsContent>
-      </Tabs>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

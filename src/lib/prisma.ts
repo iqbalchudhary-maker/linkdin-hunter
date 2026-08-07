@@ -9,4 +9,7 @@ export const prisma =
     log: ["query"], // Is se aapko terminal mein SQL nazar aati rahegi
   });
 
+// ✅ Yeh line add kar di hai taake agar koi `db` import kare toh woh bhi chal jaye
+export const db = prisma;
+
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
